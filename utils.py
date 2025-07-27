@@ -1,5 +1,26 @@
 import cv2
 import numpy as np
+import re
+
+def extract_frame_num(filename):
+    # Extract frame number from file like ...frame_0003_png...
+    m = re.search(r'frame[_\-]?0*([0-9]+)', filename)
+    if m:
+        return int(m.group(1))
+    raise ValueError(f"Could not extract frame number from {filename}")
+
+
+def iou(boxA, boxB):
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
+    interArea = max(0, xB - xA) * max(0, yB - yA)
+    boxAArea = max(0, boxA[2] - boxA[0]) * max(0, boxA[3] - boxA[1])
+    boxBArea = max(0, boxB[2] - boxB[0]) * max(0, boxB[3] - boxB[1])
+    if boxAArea + boxBArea - interArea == 0:
+        return 0.0
+    return interArea / (boxAArea + boxBArea - interArea)
 
 def find_exact_matching_frame(annot_path, video_path, max_search=5, verbose=True, resize=True):
     """
