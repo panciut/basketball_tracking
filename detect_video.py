@@ -39,11 +39,14 @@ def main():
         frame_idx += 1
 
         # Set verbose=False to suppress YOLO per-frame output
-        results = model(frame, imgsz=IMG_SIZE, verbose=False)[0]
+        results = model(frame, imgsz=IMG_SIZE, conf=0.5, iou=0.5, verbose=False)[0]
         frame_detections = []
         for box in results.boxes:
             cls = int(box.cls[0])
             label = model.names[cls]
+            # Remap "sports ball" to "ball" for output consistency
+            if label == "sports ball":
+                label = "ball"
             if label not in ALLOWED_CLASSES:
                 continue
             x1, y1, x2, y2 = map(int, box.xyxy[0])

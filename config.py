@@ -1,7 +1,7 @@
 # config.py
 VIDEO = "out13"
 VIDEO_PATH = "data/video/"+VIDEO+".mp4"
-MODEL_PATH = "yolov8x.pt"
+MODEL_PATH = "last.pt"
 OUTPUT_PATH = "output/output"+VIDEO+".mp4"
 DETECTIONS_PATH = "output/detections.json"
 TRACKING_JSON_PATH = f"output/tracking_results_{VIDEO}.json"
@@ -23,7 +23,7 @@ RUN_LABEL_ASSIGNMENT = True
 RUN_TRACKING = True
 
 IMG_SIZE = 1280
-ALLOWED_CLASSES = ["person", "sports ball"]
+ALLOWED_CLASSES = ["sports ball","player","referee","ball"]
 LOG_INTERVAL = 30
 HISTORY = 250
 VAR_THRESHOLD = 12

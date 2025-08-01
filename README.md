@@ -6,7 +6,7 @@ This project provides a modular pipeline for **detecting, tracking, and evaluati
 
 ## **Requirements**
 
-**Python 3.9+** (recommended 3.10+)
+**Python 3.9-3.12** (recommended 3.11)
 
 ### **Install dependencies**
 
@@ -203,8 +203,6 @@ Change `RUN_...` flags to skip or run different steps as needed.
 
 * For best results, ensure all paths in `config.py` are correct and up to date.
 * The evaluation/statistics script expects **frame-perfect synchronization** between annotation images and video. If frames are off, use the `find_exact_matching_frame` utility (see `utils.py`).
-* If you want to focus on specific classes (e.g., only the referee), adjust `FOCUS_LABELS` in `statistic.py`.
-
 ---
 
 **For more info or debugging, check the comments in each script.**

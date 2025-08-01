@@ -18,9 +18,10 @@ def iou(boxA, boxB):
     interArea = max(0, xB - xA) * max(0, yB - yA)
     boxAArea = max(0, boxA[2] - boxA[0]) * max(0, boxA[3] - boxA[1])
     boxBArea = max(0, boxB[2] - boxB[0]) * max(0, boxB[3] - boxB[1])
-    if boxAArea + boxBArea - interArea == 0:
+    union = boxAArea + boxBArea - interArea
+    if union <= 0:
         return 0.0
-    return interArea / (boxAArea + boxBArea - interArea)
+    return interArea / (union + 1e-6)
 
 def find_exact_matching_frame(annot_path, video_path, max_search=5, verbose=True, resize=True):
     """
