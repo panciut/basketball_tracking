@@ -68,10 +68,16 @@ def main():
     total_fn = 0
     total_gt = 0
     total_det = 0
+    all_matched_ious = []
 
     # For advanced stats
     label_tracks = {label: [] for label in label_gt}  # list of 0/1 per GT occurrence
     all_gt_ids = set()  # unique GT IDs for fragmentation
+
+    # --- Frame-by-frame stats for annotated frames ---
+    framewise_stats = []
+    framewise_stats_noball = []
+    noball_labels = {"player", "referee"}
 
     # --- Loop over annotation frames only ---
     for frame_idx in sorted(gt_per_video_frame.keys()):
@@ -82,8 +88,10 @@ def main():
         matched_gt_idx = set()
         matched_track_idx = set()
         current_tracker_to_label = {}
+        IoUs_this_frame = []
 
         # Try to match GT to tracker outputs by IoU
+        id_switches_this_frame = 0
         for gt_idx, gt in enumerate(gt_objs):
             best_iou = 0
             best_track_idx = None
@@ -97,6 +105,8 @@ def main():
             if best_iou >= IOU_THRESHOLD and best_track_idx is not None:
                 matched_gt_idx.add(gt_idx)
                 matched_track_idx.add(best_track_idx)
+                IoUs_this_frame.append(best_iou)
+                all_matched_ious.append(best_iou)
                 # Assign label to tracker id
                 track_id = tracks[best_track_idx]['id']
                 current_tracker_to_label[track_id] = gt['label']
@@ -104,26 +114,29 @@ def main():
                 prev_ids = [k for k, v in prev_tracker_id_to_label.items() if v == gt['label']]
                 if prev_ids and track_id not in prev_ids:
                     label_id_switch[gt['label']] = label_id_switch.get(gt['label'], 0) + 1
+                    id_switches_this_frame += 1
                 label_lost.setdefault(gt['label'], 0)
                 label_id_switch.setdefault(gt['label'], 0)
-                # For advanced stats (fragmentation, MT/ML)
                 label_tracks[gt['label']].append(1)
             else:
                 label_tracks[gt['label']].append(0)
-
             all_gt_ids.add(gt.get('gt_id'))
 
         # Count False Negatives: GT not matched to any detection
+        frame_fp = 0
+        frame_fn = 0
         for gt_idx, gt in enumerate(gt_objs):
             if gt_idx not in matched_gt_idx:
                 label_fn[gt['label']] = label_fn.get(gt['label'], 0) + 1
                 total_fn += 1
+                frame_fn += 1
         # Count False Positives: Tracker detection not matched to any GT
         for t_idx, t in enumerate(tracks):
             if t_idx not in matched_track_idx:
                 label = prev_tracker_id_to_label.get(t['id'], "unassigned")
                 label_fp[label] = label_fp.get(label, 0) + 1
                 total_fp += 1
+                frame_fp += 1
 
         # Count "lost": previous label not seen anymore in GT
         matched_labels = {gt_objs[gt_idx]['label'] for gt_idx in matched_gt_idx}
@@ -136,6 +149,62 @@ def main():
         total_gt += len(gt_objs)
         total_det += len(tracks)
 
+        # Frame-level summary (ALL)
+        num_matches = len(matched_gt_idx)
+        avg_iou_this_frame = np.mean(IoUs_this_frame) if IoUs_this_frame else 0.0
+        mota = 1.0 - (frame_fp + frame_fn + id_switches_this_frame) / max(1, len(gt_objs))
+        framewise_stats.append({
+            "frame_idx": frame_idx,
+            "GT": len(gt_objs),
+            "Det": len(tracks),
+            "Matched": num_matches,
+            "FP": frame_fp,
+            "FN": frame_fn,
+            "IDSW": id_switches_this_frame,
+            "MOTA": mota,
+            "IoU": avg_iou_this_frame
+        })
+
+                # --- Frame-level summary (NO BALL, exclude "Ball"/"ball" in GT and det) ---
+        # GT indices NOT "Ball" (case-insensitive)
+        gt_noball_indices = [i for i, obj in enumerate(gt_objs) if obj["label"].lower() != "ball"]
+        # Det indices NOT "ball" (case-insensitive)
+        tracks_noball_indices = [i for i, t in enumerate(tracks) if t["label"].lower() != "ball"]
+        matched_gt_nb = set()
+        matched_tr_nb = set()
+        ious_nb = []
+        # Simple matching for NB (repeat the matching logic, but on NB sets)
+        for ngt_idx, gt_idx in enumerate(gt_noball_indices):
+            gt = gt_objs[gt_idx]
+            best_iou = 0
+            best_t_nb = None
+            for ntr_idx, tr_idx in enumerate(tracks_noball_indices):
+                if ntr_idx in matched_tr_nb:
+                    continue
+                t = tracks[tr_idx]
+                iou_score = iou(gt['bbox'], t['bbox'])
+                if iou_score > best_iou:
+                    best_iou = iou_score
+                    best_t_nb = ntr_idx
+            if best_iou >= IOU_THRESHOLD and best_t_nb is not None:
+                matched_gt_nb.add(ngt_idx)
+                matched_tr_nb.add(best_t_nb)
+                ious_nb.append(best_iou)
+        fn_nb = len(gt_noball_indices) - len(matched_gt_nb)
+        fp_nb = len(tracks_noball_indices) - len(matched_tr_nb)
+        num_matches_nb = len(matched_gt_nb)
+        mota_nb = 1.0 - (fp_nb + fn_nb) / max(1, len(gt_noball_indices))
+        avg_iou_nb = np.mean(ious_nb) if ious_nb else 0.0
+        framewise_stats_noball.append({
+            "frame_idx": frame_idx,
+            "GT": len(gt_noball_indices),
+            "Det": len(tracks_noball_indices),
+            "Matched": num_matches_nb,
+            "FP": fp_nb,
+            "FN": fn_nb,
+            "MOTA": mota_nb,
+            "IoU": avg_iou_nb
+        })
     # ==== Print summary ====
     print("\n=== SUMMARY ===")
     print(f"Total GT objects: {total_gt}")
@@ -153,6 +222,7 @@ def main():
     total_idsw = sum(label_id_switch.values())
     id_switch_rate = total_idsw / max(1, total_gt)
     mota = 1 - (total_fn + total_fp + total_idsw) / max(1, total_gt)
+    avg_global_iou = np.mean(all_matched_ious) if all_matched_ious else 0.0
 
     print(f"\nGlobal Precision: {100*overall_precision:.2f}%")
     print(f"Global Recall:    {100*overall_recall:.2f}%")
@@ -160,6 +230,33 @@ def main():
     print(f"ID switches:      {total_idsw}")
     print(f"ID switch rate:   {100*id_switch_rate:.2f}%")
     print(f"MOTA (rough):     {100*mota:.2f}%")
+    print(f"Global Avg IoU:   {100*avg_global_iou:.2f}%")
+
+        # === Compute NB ("no ball") global metrics ===
+    total_gt_nb = sum(row["GT"] for row in framewise_stats_noball)
+    total_det_nb = sum(row["Det"] for row in framewise_stats_noball)
+    total_fp_nb = sum(row["FP"] for row in framewise_stats_noball)
+    total_fn_nb = sum(row["FN"] for row in framewise_stats_noball)
+    total_matches_nb = sum(row["Matched"] for row in framewise_stats_noball)
+    total_idsw_nb = 0  # (not counted in NB, see per-frame for matches only)
+    # Compute average IoU over all NB matches
+    all_matched_ious_nb = []
+    for row in framewise_stats_noball:
+        if row["Matched"] > 0:
+            all_matched_ious_nb.extend([row["IoU"]] * row["Matched"])
+    avg_global_iou_nb = np.mean(all_matched_ious_nb) if all_matched_ious_nb else 0.0
+
+    overall_precision_nb = total_matches_nb / total_det_nb if total_det_nb > 0 else 0.0
+    overall_recall_nb = total_matches_nb / total_gt_nb if total_gt_nb > 0 else 0.0
+    overall_f1_nb = 2 * overall_precision_nb * overall_recall_nb / (overall_precision_nb + overall_recall_nb) if (overall_precision_nb + overall_recall_nb) > 0 else 0.0
+    mota_nb = 1 - (total_fn_nb + total_fp_nb + total_idsw_nb) / max(1, total_gt_nb)
+
+    print(f"\n------ 'NO BALL' (players + referees) METRICS ------")
+    print(f"Global Precision (NB): {100*overall_precision_nb:.2f}%")
+    print(f"Global Recall (NB):    {100*overall_recall_nb:.2f}%")
+    print(f"Global F1-score (NB):  {100*overall_f1_nb:.2f}%")
+    print(f"MOTA (NB):             {100*mota_nb:.2f}%")
+    print(f"Global Avg IoU (NB):   {100*avg_global_iou_nb:.2f}%")
 
     # --- Per-label metrics ---
     print("\nPer-label stats:")
@@ -199,12 +296,26 @@ def main():
         percent_tracked = tracked / total if total else 0
         MT = int(percent_tracked >= 0.8)
         ML = int(percent_tracked <= 0.2)
-        # Fragmentations: # of transitions from tracked->not tracked and vice versa
         frag = 0
         for i in range(1, len(history)):
             if history[i] != history[i-1]:
                 frag += 1
         print(f"{label:>12} | {MT:4d} | {ML:4d} | {frag:5d}")
+
+    # --- Framewise annotated summary ---
+    print("\n=== Annotated Frames: Frame-by-frame summary ===")
+    print(f"{'Frame':>6} | {'GT':>3} | {'Det':>3} | {'Mch':>3} | {'FP':>2} | {'FN':>2} | {'IDSW':>4} | {'MOTA':>6} | {'IoU':>5} ||| "
+          f"{'GT(NB)':>6} | {'Det(NB)':>7} | {'Mch(NB)':>8} | {'FP(NB)':>6} | {'FN(NB)':>6} | {'MOTA(NB)':>9} | {'IoU(NB)':>8}")
+    print('-'*120)
+    for row, row_nb in zip(framewise_stats, framewise_stats_noball):
+        print(f"{row['frame_idx']:6} | {row['GT']:3d} | {row['Det']:3d} | {row['Matched']:3d} | {row['FP']:2d} | {row['FN']:2d} | {row['IDSW']:4d} | {row['MOTA']*100:6.2f} | {row['IoU']*100:5.2f} ||| "
+              f"{row_nb['GT']:6d} | {row_nb['Det']:7d} | {row_nb['Matched']:8d} | {row_nb['FP']:6d} | {row_nb['FN']:6d} | {row_nb['MOTA']*100:9.2f} | {row_nb['IoU']*100:8.2f}")
+
+    print("\n=== METRIC DEFINITIONS ===")
+    print("GT: Ground-truth objects; Det: Detections; Mch: Matched; FP: False Positive; FN: False Negative; IDSW: ID Switches;")
+    print("IoU: mean intersection-over-union for matched pairs (per frame, per summary);")
+    print("MOTA = 1 - (FP+FN+IDSW)/GT   (higher is better, up to 100%)")
+    print("NB = 'No Ball' subset (players+referee only)")
 
     print("\n=== DONE ===")
 
