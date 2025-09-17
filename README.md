@@ -39,15 +39,26 @@ basketball_tracking/
 │       ├── out13_frame_0001_....jpg   # Annotated frame images from Roboflow
 │       └── _annotations.coco.json     # COCO format annotation file (from Roboflow export)
 │
-├── output/
-│   └── ...                        # All outputs saved here (videos, jsons)
+├── 2DTracking/
+│   ├── output/      # All outputs saved here (videos, jsons)
+│   ├── last.pt      #weights of the best training for YOLO
+│   ├── config.py 
+│   ├── detect_video.py 
+│   ├── mapping.py 
+│   ├── statistics.py
+│   ├── summarize_detections.py 
+│   ├── track_deepsort.py  
+│   └── utils.py 
 │
-├── config.py
-├── detect_video.py
-├── track_deepsort.py
-├── statistic.py
-├── utils.py
-├── README.md
+├── 3DTracking/
+│   ├── output/ 
+│   ├── retified/    #rectified version of the original videos for the 3D tracking
+│   │   └── out13.mp4
+│   ├── rectified_video.py   
+│   └── triangulation.py 
+|
+├── requirements.txt
+└── README.md
 ```
 
 * **Videos:** Should be placed in `data/video/` (e.g., `out13.mp4`).
