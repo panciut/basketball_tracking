@@ -7,11 +7,11 @@ import config
 from utils import iou
 
 def main():
-    VIDEO = config.VIDEO
+    VIDEO = config.CAM
     VIDEO_PATH = config.VIDEO_PATH
     DETECTIONS_PATH = config.DETECTIONS_PATH
-    OUTPUT_PATH = f"output/tracked_deepsort_progress_{VIDEO}.mp4"
-    TRACKING_JSON_PATH = f"output/tracking_results_{VIDEO}.json"
+    OUTPUT_PATH = f"../3DTracking/output/tracked_deepsort_progress_{VIDEO}.mp4"
+    TRACKING_JSON_PATH = f"../3DTracking/output/tracking_results_{VIDEO}.json"
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     with open(DETECTIONS_PATH, "r") as f:
