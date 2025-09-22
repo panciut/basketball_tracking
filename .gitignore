@@ -1,6 +1,9 @@
 data/
 output/
+*.mp4
 venv/
 *.pt
 __pycache__
 .DS_Store
+3DTracking/rectified
+3DTracking/output

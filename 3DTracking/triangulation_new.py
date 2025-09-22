@@ -42,6 +42,5 @@ def main():
     calib = load_calibration()
     print(calib)
 
-
 if __name__ == "__main__":
     main()
