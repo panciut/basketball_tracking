@@ -52,7 +52,7 @@ def process_video(video_path, calib_path, output_path):
 def main():
     directory = os.path.dirname(os.path.abspath(__file__))  # absolute base dir of script
     input_dir = os.path.normpath(os.path.join(directory, "..", "data/video"))
-    output_dir = os.path.normpath(os.path.join(directory, "rectified"))
+    output_dir = os.path.normpath(os.path.join(directory, "..", "data/rectified"))
 
     videos = glob.glob(os.path.join(input_dir, "out*.mp4"))
     if not videos:
