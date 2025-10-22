@@ -32,6 +32,7 @@ from matplotlib.widgets import Slider, Button
 from matplotlib.animation import FuncAnimation
 import numpy as np
 
+JSON_INPUT = "output/tracking3d_output_multi.json"
 # Limits for displayed detections
 MAX_DISPLAY_PLAYERS = 12
 MAX_DISPLAY_REFEREES = 2
@@ -370,8 +371,6 @@ class Playback2D:
 # -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
-
-JSON_INPUT = "output/tracking3d_output_multi.json"
 def main():
 
     frames = load_frames(JSON_INPUT)

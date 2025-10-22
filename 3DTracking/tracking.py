@@ -20,6 +20,9 @@ from scipy.optimize import linear_sum_assignment
 # -----------------------------
 # Parameters
 # -----------------------------
+FPS = 25.0
+CSV_INPUT = "output/tracks_3d.csv"
+OUT_JSON = "output/tracking3d_output_multi.json"
 
 @dataclass
 class MOT3DParams:
@@ -282,10 +285,6 @@ def save_json(tracks, out_path):
 # -----------------------------
 # Main
 # -----------------------------
-
-FPS = 25.0
-CSV_INPUT = "output/tracks_3d.csv"
-OUT_JSON = "output/tracking3d_output_multi.json"
 
 def main():
 
