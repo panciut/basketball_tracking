@@ -5,6 +5,9 @@ import os
 import glob
 import re
 
+INPUT_DIR = "../data/video"
+OUTPUT_DIR = "../data/rectified"
+
 def load_calibration(calib_path):
     with open(calib_path, 'r') as f:
         calib = json.load(f)
@@ -50,30 +53,27 @@ def process_video(video_path, calib_path, output_path):
     print(f"Finished processing video: {video_path}")
 
 def main():
-    directory = os.path.dirname(os.path.abspath(__file__))  # absolute base dir of script
-    input_dir = os.path.normpath(os.path.join(directory, "..", "data/video"))
-    output_dir = os.path.normpath(os.path.join(directory, "..", "data/rectified"))
 
-    videos = glob.glob(os.path.join(input_dir, "out*.mp4"))
+    videos = glob.glob(os.path.join(INPUT_DIR, "out*.mp4"))
     if not videos:
-        print(f"No videos found in: {input_dir}")
+        print(f"No videos found in: {INPUT_DIR}")
         return
 
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     for video_path in videos:
         basename = os.path.basename(video_path)
         match = re.search(r'out(\d+)\.mp4', basename)
         if match:
             cam_index = match.group(1)
-            calib_path = os.path.join(directory, "..", f"camera_data/cam_{cam_index}/calib/camera_calib.json")  # absolute
+            calib_path = f"../camera_data/cam_{cam_index}/calib/camera_calib.json"  # absolute
             if not os.path.exists(calib_path):
                 print(f"[WARNING] Calibration file does not exist: {calib_path} -- skipping this video.")
                 continue
         else:
             print("Could not extract camera index from filename:", video_path)
             continue
-        output_path = os.path.join(output_dir, basename)
+        output_path = os.path.join(OUTPUT_DIR, basename)
         print(f"Processing {video_path} using calibration file {calib_path}...")
         process_video(video_path, calib_path, output_path)
 
