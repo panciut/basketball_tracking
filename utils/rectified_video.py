@@ -9,14 +9,16 @@ INPUT_DIR = "../data/video"
 OUTPUT_DIR = "../data/rectified"
 
 def load_calibration(calib_path):
-    with open(calib_path, 'r') as f:
-        calib = json.load(f)
-    mtx = np.array(calib["mtx"], dtype=np.float32)
-    dist = np.array(calib["dist"], dtype=np.float32)
-    return mtx, dist
+    with open(calib_path, "r") as f:
+            data = json.load(f)
+    mtx = np.array(data.get("K", data.get("mtx")), dtype=float)
+    rvec = np.array(data.get("rvec", data.get("rvecs")), dtype=float).reshape(-1)[:3]
+    tvec = np.array(data.get("tvec", data.get("tvecs")), dtype=float).reshape(-1)[:3]
+    dist = np.array(data.get("dist", data.get("distCoeffs", [0,0,0,0,0])), dtype=float).reshape(-1)
+    return mtx, rvec, tvec, dist
 
-def process_video(video_path, calib_path, output_path):
-    mtx, dist = load_calibration(calib_path)
+def process_video(video_path, calib_path, output_path, cam_index):
+    mtx, rvec, tvec, dist = load_calibration(calib_path)
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("Error opening video file:", video_path)
@@ -34,6 +36,19 @@ def process_video(video_path, calib_path, output_path):
     map_x, map_y = cv2.initUndistortRectifyMap(
         mtx, dist, None, new_mtx, (width, height), cv2.CV_32FC1
     )
+
+    # once you have computed the new camera parameters for the undistortion
+    # save the new calibration file as camera_calib_rectified.json
+    rectified_calib = {
+        "mtx": new_mtx.tolist(),
+        "dist": [0.0, 0.0, 0.0, 0.0, 0.0],  # No distortion after rectification
+        "tvec": tvec.tolist(),
+        "rvec": rvec.tolist()
+    }
+    rectified_calib_path = f"../camera_data/cam_{cam_index}/calib/cam_{cam_index}_calib_rectified.json"
+    with open(rectified_calib_path, "w") as f:
+        json.dump(rectified_calib, f, indent=4)
+    print(f"Saved rectified calibration to: {rectified_calib_path}")
 
     frame_count = 0
     while True:
@@ -75,7 +90,7 @@ def main():
             continue
         output_path = os.path.join(OUTPUT_DIR, basename)
         print(f"Processing {video_path} using calibration file {calib_path}...")
-        process_video(video_path, calib_path, output_path)
+        process_video(video_path, calib_path, output_path, cam_index)
 
 if __name__ == "__main__":
     main()

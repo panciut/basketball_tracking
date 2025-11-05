@@ -39,37 +39,32 @@ class Rectifier:
         self.alpha = float(alpha)
         # Cache: key=(cam_idx, width, height) -> (mtx, dist, new_mtx)
         self._cache_cam_params: Dict[Tuple[str, int, int], Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        # Cartella del presente script (per path calibrazione)
-        self.script_dir = os.path.dirname(os.path.abspath(__file__))
 
     def _get_cam_params(self, cam_idx: str, width: int, height: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         key = (cam_idx, width, height)
         if key in self._cache_cam_params:
             return self._cache_cam_params[key]
 
-        calib_rel_path = os.path.join(f"../camera_data/cam_{cam_idx}/calib/camera_calib.json")
-        calib_path = os.path.join(self.script_dir, calib_rel_path)
+        calib_path = f"../camera_data/cam_{cam_idx}/calib/camera_calib_rectified.json"
         if not os.path.isfile(calib_path):
             raise FileNotFoundError(f"Missing calibration for cam {cam_idx}: {calib_path}")
-
         mtx, dist = load_calibration(calib_path)
 
-        new_mtx, _ = cv2.getOptimalNewCameraMatrix(
-            mtx, dist, (width, height),
-            alpha=self.alpha,
-            newImgSize=(width, height)
-        )
+        calib_rect_path = f"../camera_data/cam_{cam_idx}/calib/camera_calib_rectified.json"
+        if not os.path.isfile(calib_rect_path):
+            raise FileNotFoundError(f"Missing calibration for cam {cam_idx}: {calib_rect_path}")
+        rect_mtx, _ = load_calibration(calib_rect_path)
 
-        self._cache_cam_params[key] = (mtx, dist, new_mtx)
-        return mtx, dist, new_mtx
+        self._cache_cam_params[key] = (mtx, dist, rect_mtx)
+        return mtx, dist, rect_mtx
 
     def undistort_points(self, pts: np.ndarray, cam_idx: str, width: int, height: int) -> np.ndarray:
         if pts.size == 0:
             return pts.astype(np.float32)
 
-        mtx, dist, new_mtx = self._get_cam_params(cam_idx, width, height)
+        mtx, dist, rect_mtx = self._get_cam_params(cam_idx, width, height)
         pts_in = pts.reshape(-1, 1, 2).astype(np.float32)
-        pts_und = cv2.undistortPoints(pts_in, mtx, dist, R=None, P=new_mtx)
+        pts_und = cv2.undistortPoints(pts_in, mtx, dist, R=None, P=rect_mtx)
         return pts_und.reshape(-1, 2)
 
     @staticmethod

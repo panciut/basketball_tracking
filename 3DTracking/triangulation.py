@@ -1,6 +1,6 @@
-# triangulation_position.py — upgraded for covariance, N-view clustering, optional PnP pose fix
+# triangulation_position.py — upgraded for covariance, N-view clustering
 # Changes inspired by triangulation.py: full 3x3 cov export, camera-agnostic clustering, pose re-estimation.
-# Keeps: Huber-weighted LM with per-camera weights; ±1 frame temporal aggregation.
+# NEW: label-aware UV extraction: ball=center, player/referee=footpoint (used in association & triangulation)
 
 import json
 from dataclasses import dataclass
@@ -17,15 +17,15 @@ from itertools import combinations, product
 # ===============================
 # CONFIG
 # ===============================
-CALIB2_PATH = "../camera_data/cam_2/calib/camera_calib.json"
-CALIB4_PATH = "../camera_data/cam_4/calib/camera_calib.json"
-CALIB13_PATH = "../camera_data/cam_13/calib/camera_calib.json"
+CALIB2_PATH = "../camera_data/cam_2/calib/cam_2_calib_rectified.json"
+CALIB4_PATH = "../camera_data/cam_4/calib/cam_4_calib_rectified.json"
+CALIB13_PATH = "../camera_data/cam_13/calib/cam_13_calib_rectified.json"
 
 TRACKS2_PATH = "output/tracking_results_rect_out2.json"
 TRACKS4_PATH = "output/tracking_results_rect_out4.json"
 TRACKS13_PATH = "output/tracking_results_rect_out13.json"
 
-OUTPUT_CSV = "output/tracks_3d.csv"  # now includes covariance columns
+OUTPUT_CSV = "output/triangulations_3d.csv"  # now includes covariance columns
 
 # Optional: camera pose refinement via field correspondences
 # JSON format (example):
@@ -34,23 +34,22 @@ OUTPUT_CSV = "output/tracks_3d.csv"  # now includes covariance columns
 #   "4": [...],
 #   "13":[...]
 # }
-FIELD_POINTS_JSON: Optional[str] = None  # e.g., "camera_data/field_points.json"
 
 FPS = 25.0
 
 # Initial (tunable) gates — may be adapted automatically
 EPI_GATE_PX_INIT = 6.0
-PITCH_GATE_M_INIT = 3.0
+PITCH_GATE_M_INIT = 1.5
 
 USE_EPIPOLAR = True
-USE_PITCH_GATE = False
+USE_PITCH_GATE = True
 
 # Robust refinement
 HUBER_DELTA_PX = 1.2
 SOFT_Z_SIGMA = 0.0  # meters (0 disables soft ground prior)
 
 # Acceptance thresholds
-MAX_RMS_REPROJ_PX = 2.0  # strict, but covariance-aware tracker will downweight tough points
+MAX_RMS_REPROJ_PX = 7.0  # strict, but covariance-aware tracker will downweight tough points
 
 # Global tracker (simple CV-3D for smoothing IDs across frames)
 ASSOC_MAX_DIST_M = 1.5
@@ -68,7 +67,7 @@ IMAGE_SIZE = (IMAGE_SIZE_W, IMAGE_SIZE_H)
 CAM_WEIGHTS_INIT = {"2": 1.0, "4": 0.8, "13": 0.6}
 
 # Temporal matching window (± frames)
-TEMPORAL_WINDOW = 1  # 0 = off, 1 = enable ±1 frame
+TEMPORAL_WINDOW = 0  # 0 = off, 1 = enable ±1 frame
 
 # Adaptive controller settings
 ADAPTIVE = False
@@ -81,9 +80,6 @@ CAM13_CAP = 1.0
 
 # Preferred camera for tie-breaking labels
 PRIMARY_CAM = "13"
-
-# Use bbox center instead of foot for triangulation/matching
-USE_BBOX_CENTER = True
 
 # Covariance regularization (in world-units squared)
 COV_EIG_MIN = 1e-6   # m^2
@@ -139,39 +135,23 @@ class Camera:
     def from_json(name: str, path: str, image_size: Tuple[int,int]=IMAGE_SIZE) -> "Camera":
         with open(path, "r") as f:
             data = json.load(f)
-        K0 = np.array(data.get("K", data.get("mtx")), dtype=float)
+        K = np.array(data.get("K", data.get("mtx")), dtype=float)
         rvec = np.array(data.get("rvec", data.get("rvecs")), dtype=float).reshape(-1)[:3]
         tvec = np.array(data.get("tvec", data.get("tvecs")), dtype=float).reshape(-1)[:3]
         dist = np.array(data.get("dist", data.get("distCoeffs", [0,0,0,0,0])), dtype=float).reshape(-1)
         if dist.size not in (4,5,8):
             dist = np.zeros(5, dtype=float)
         R, _ = cv2.Rodrigues(rvec.reshape(3,1))
-        new_K, _ = cv2.getOptimalNewCameraMatrix(K0.astype(np.float32), dist.astype(np.float32), image_size, alpha=0)
-        new_K = new_K.astype(float)
-        P = make_projection(new_K, R, tvec)
+
+        P = make_projection(K, R, tvec)
         C = -R.T @ tvec.reshape(3,1)
-        return Camera(name=name, K=new_K, R=R, t=tvec, P=P, C=C, dist=dist)
+        return Camera(name=name, K=K, R=R, t=tvec, P=P, C=C, dist=dist)
 
     def update_pose(self, R: np.ndarray, t: np.ndarray):
         self.R = R.copy()
         self.t = t.reshape(3,)
         self.P = make_projection(self.K, self.R, self.t)
         self.C = -self.R.T @ self.t.reshape(3,1)
-
-def refine_pose_solvepnp(cam: Camera, points_3d: np.ndarray, points_2d: np.ndarray):
-    """Optional extrinsic refinement from field landmarks (world→image).
-       points_3d: Nx3 in *the same units* as t (mm if WORLD_SCALE=1/1000)
-       points_2d: Nx2 in pixels (undistorted domain)
-    """
-    if len(points_3d) < 6 or len(points_3d) != len(points_2d):
-        return
-    ok, rvec, tvec = cv2.solvePnP(points_3d.astype(np.float32),
-                                  points_2d.astype(np.float32),
-                                  cam.K.astype(np.float64),
-                                  np.zeros_like(cam.dist, dtype=np.float64))
-    if ok:
-        R, _ = cv2.Rodrigues(rvec)
-        cam.update_pose(R, tvec.reshape(3,))
 
 # ===============================
 # Tracking I/O
@@ -193,6 +173,22 @@ def center_from_bbox(b: List[float]) -> np.ndarray:
         w = w_or_x2; h = h_or_y2
     w = max(w, 0.0); h = max(h, 0.0)
     return np.array([x + 0.5 * w, y + 0.5 * h], dtype=float)
+
+def uv_by_label(det: Dict[str, Any]) -> np.ndarray:
+    """
+    Label-aware image point:
+      - 'ball' -> bbox center
+      - 'player' or 'referee' -> footpoint
+      - fallback (unknown/None) -> footpoint
+    """
+    lab = det.get("label", None)
+    lab_s = str(lab).lower() if lab is not None else ""
+    if "ball" in lab_s:
+        return center_from_bbox(det["bbox"])
+    if "player" in lab_s or "referee" in lab_s:
+        return foot_from_bbox(det["bbox"])
+    # Fallback: better to use footpoint for general on-ground actors
+    return foot_from_bbox(det["bbox"])
 
 def det_track_id(det: Optional[Dict[str, Any]]) -> float:
     if not det:
@@ -293,9 +289,9 @@ def pairwise_match_by_epipolar_with_cost(dets_i, dets_j, F_ij, epi_gate_px: floa
     n, m = len(dets_i), len(dets_j)
     Cmat = np.full((n,m), 1e6, dtype=float)
     for a in range(n):
-        uva = center_from_bbox(dets_i[a]["bbox"]) if USE_BBOX_CENTER else foot_from_bbox(dets_i[a]["bbox"])
+        uva = uv_by_label(dets_i[a])
         for b in range(m):
-            uvb = center_from_bbox(dets_j[b]["bbox"]) if USE_BBOX_CENTER else foot_from_bbox(dets_j[b]["bbox"])
+            uvb = uv_by_label(dets_j[b])
             ed = epipolar_dist_pairwise(F_ij, uva, uvb) if F_ij is not None else 0.0
             if ed > epi_gate_px:
                 continue
@@ -378,7 +374,6 @@ def refine_triangulated_point_with_cov(X0: np.ndarray,
     per_cam, rms = compute_reproj_errors([o[0] for o in obs], [o[1] for o in obs], X)
 
     # --- Covariance from Gauss-Newton: cov ≈ σ² * (Jᵀ J)⁻¹ ---
-    # residuals are in pixels (after robust & cam weights). Use DOF-adjusted sigma from RMS.
     J = res.jac  # shape: (2M [+1], 3)
     JTJ = J.T @ J
     JTJ += np.eye(3) * COV_DAMP  # numerical damping
@@ -392,7 +387,6 @@ def refine_triangulated_point_with_cov(X0: np.ndarray,
     cov *= sigma2_px
 
     # Convert to world units (meters) if current coordinates are millimetric.
-    # Coordinates returned by triangulation follow the unit of t; WORLD_SCALE maps them to meters.
     cov_m = (WORLD_SCALE ** 2) * cov
 
     # Eigen clamp to keep cov well-conditioned for downstream gating
@@ -602,28 +596,6 @@ class AdaptiveLogger:
             print(f"[LOG] No adaptive metrics collected; created empty log at {self.log_path}")
 
 # ===============================
-# Helper: Optional field correspondences loader
-# ===============================
-def maybe_load_field_points(path: Optional[str]) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
-    out: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
-    if not path:
-        return out
-    p = Path(path)
-    if not p.exists():
-        print(f"[PnP] FIELD_POINTS_JSON not found: {p}")
-        return out
-    with open(p, "r") as f:
-        d = json.load(f)
-    for cam_name, lst in d.items():
-        w = []; im = []
-        for item in lst:
-            w.append(item["world"])
-            im.append(item["image"])
-        if len(w) >= 6:
-            out[cam_name] = (np.array(w, dtype=float), np.array(im, dtype=float))
-    return out
-
-# ===============================
 # N-view clustering from pairwise epipolar matches
 # ===============================
 class UnionFind:
@@ -706,8 +678,8 @@ def choose_best_combo(comp: Dict[str, List[int]],
             ca, cb = cams[a], cams[b]
             ia, ib = choice[a], choice[b]
             det_a = dets_by_cam[ca][ia]; det_b = dets_by_cam[cb][ib]
-            uva = center_from_bbox(det_a["bbox"]) if USE_BBOX_CENTER else foot_from_bbox(det_a["bbox"])
-            uvb = center_from_bbox(det_b["bbox"]) if USE_BBOX_CENTER else foot_from_bbox(det_b["bbox"])
+            uva = uv_by_label(det_a)
+            uvb = uv_by_label(det_b)
             F = pairwise_F.get((ca, cb))
             if F is None:
                 continue
@@ -732,15 +704,6 @@ def run_pipeline():
     cam4 = Camera.from_json("4", CALIB4_PATH, IMAGE_SIZE)
     cam13 = Camera.from_json("13", CALIB13_PATH, IMAGE_SIZE)
     cams_by_name = {"2": cam2, "4": cam4, "13": cam13}
-
-    # Optional pose refinement from field points (if provided)
-    field_pts = maybe_load_field_points(FIELD_POINTS_JSON)
-    for cname, cam in cams_by_name.items():
-        if cname in field_pts:
-            W, im = field_pts[cname]
-            # If your field points are in meters but t is in mm, rescale
-            # Here we assume they are in the SAME UNIT as cam.t. Adjust if needed.
-            refine_pose_solvepnp(cam, W, im)
 
     # Precompute fundamentals for all camera pairs (ordered tuple key)
     pairwise_F: Dict[Tuple[str,str], np.ndarray] = {}
@@ -777,9 +740,6 @@ def run_pipeline():
         "cov_xx", "cov_xy", "cov_xz", "cov_yy", "cov_yz", "cov_zz"
     ]
 
-    def uv_from_det(det):
-        return center_from_bbox(det["bbox"]) if USE_BBOX_CENTER else foot_from_bbox(det["bbox"])
-
     def to_world(X_maybe_mm: np.ndarray) -> np.ndarray:
         return np.array([float(X_maybe_mm[0]) * WORLD_SCALE,
                          float(X_maybe_mm[1]) * WORLD_SCALE,
@@ -813,7 +773,7 @@ def run_pipeline():
                     break
                 cams.append(cams_by_name[cname])
                 det = dets_by_cam_flat[cname][idx_det]
-                uvs.append(uv_from_det(det))
+                uvs.append(uv_by_label(det))  # label-aware UVs
                 det_map[cname] = det
                 ids_map[cname] = det_track_id(det)
             else:
@@ -858,7 +818,7 @@ def run_pipeline():
                     continue
                 camA, camB = cams_by_name[ci], cams_by_name[cj]
                 detA, detB = dets_i[ii], dets_j[jj]
-                uvA, uvB = uv_from_det(detA), uv_from_det(detB)
+                uvA, uvB = uv_by_label(detA), uv_by_label(detB)  # label-aware UVs
                 cams = [camA, camB]; uvs = [uvA, uvB]
                 X = triangulate_points(cams, uvs)
                 if X is None:

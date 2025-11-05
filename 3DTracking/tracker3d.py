@@ -47,7 +47,7 @@ except Exception:  # pragma: no cover
 # =========================
 
 # I/O
-INPUT_CSV  = "output/tracks_3d.csv"
+INPUT_CSV  = "output/triangulations_3d.csv"
 OUTPUT_JSON = "output/tracking3d_output.json"
 
 # Tracking parameters
