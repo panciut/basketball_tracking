@@ -49,7 +49,7 @@ HUBER_DELTA_PX = 1.2
 SOFT_Z_SIGMA = 0.0  # meters (0 disables soft ground prior)
 
 # Acceptance thresholds
-MAX_RMS_REPROJ_PX = 7.0  # strict, but covariance-aware tracker will downweight tough points
+MAX_RMS_REPROJ_PX = 3.0  # strict, but covariance-aware tracker will downweight tough points
 
 # Global tracker (simple CV-3D for smoothing IDs across frames)
 ASSOC_MAX_DIST_M = 1.5

@@ -99,7 +99,6 @@ def gt_class_conversion(class_id: int) -> int:
 
 
 CLASS_ID2NAME = {0: "ball", 1: "player", 2: "referee"}
-_CAM_RGX = re.compile(r"cam[_-]?(\d+)", re.IGNORECASE)
 
 
 def pred_class_to_id(name: str) -> int:
@@ -198,14 +197,12 @@ def _collect_cam_image_sizes_from_coco(
 
 
 def load_calibrations_and_H(
-    camera_data_path: str,
-    cam_image_sizes: Optional[Dict[str, Tuple[int, int]]] = None,
-    alpha: float = ALPHA_RECT,
+    camera_data_path: str
 ) -> Dict[str, dict]:
     cams = {}
     for cam_dir in sorted(Path(camera_data_path).glob("*")):
         cam_key = normalize_cam_id(cam_dir.name)
-        calib_file = cam_dir / "calib" / "camera_calib.json"
+        calib_file = cam_dir / "calib" / f"{cam_dir.name}_calib_rectified.json"
         if not calib_file.exists():
             continue
         j = json.loads(calib_file.read_text(encoding="utf-8"))
@@ -223,15 +220,6 @@ def load_calibrations_and_H(
                     break
                 except Exception:
                     pass
-        if K_use is None and dist is not None and cam_image_sizes is not None:
-            wh = cam_image_sizes.get(cam_key, DEFAULT_IMG_SIZE)
-            try:
-                K_new, _ = cv2.getOptimalNewCameraMatrix(
-                    K.astype(np.float32), dist.astype(np.float32), wh, alpha, wh
-                )
-                K_use = K_new.astype(float)
-            except Exception:
-                K_use = K
         if K_use is None:
             K_use = K
         H = K_use @ np.column_stack([R[:, 0], R[:, 1], t.reshape(3)])
@@ -1378,9 +1366,7 @@ def main():
     gt_by_fc = load_gt_coco(COCO_GT_PATH)
     print(f"Loaded {len(gt_by_fc)} GT annotations from {COCO_GT_PATH}")
     cam_sizes = _collect_cam_image_sizes_from_coco(COCO_GT_PATH)
-    calib = load_calibrations_and_H(
-        CAMERA_DATA, cam_image_sizes=cam_sizes, alpha=ALPHA_RECT
-    )
+    calib = load_calibrations_and_H(CAMERA_DATA)
     print(f"Loaded cameras: {sorted(calib.keys())}")
 
     # 3) Allineamento, proiezione e dedup
